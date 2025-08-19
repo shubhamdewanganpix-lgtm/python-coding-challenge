@@ -44,7 +44,7 @@ For each impression, we build the following fields:
 
 ## ⚙️ PySpark Pipeline
 
-Implemented in **`pipeline.py`**
+Implemented in **`data_pipeline.py`**
 
 ### Inputs
 - `clicks_df`: user click logs  
