@@ -1,109 +1,98 @@
-Overview
+# 🚀 PySpark Coding Challenge
 
-This repository contains a PySpark data pipeline that prepares training input data for a recommender system / click-through prediction model.
+## 📖 Overview
+This repository contains a **PySpark data pipeline** that prepares training input data for a recommender system / click-through prediction model.
 
-The PyTorch model, embeddings, and training code are not part of this repo (they will be implemented later). Our goal here is to:
+> ⚠️ The PyTorch model, embeddings, and training code are **not part of this repo**.  
+> They will be implemented in a future iteration.  
+> Our focus here is to:
+> - Build training input data from raw behavioral logs (**clicks, carts, orders**).
+> - Ensure sequences are constructed correctly (**last 1000 actions**).
+> - Output the data in a format that can be consumed efficiently by **GPU training**.
 
-Build training input data from raw behavioral logs (clicks, carts, orders).
+---
 
-Ensure sequences are constructed correctly (last 1000 actions).
-
-Output the data in a format that can be consumed efficiently by GPU training.
-
-High-Level Design of Training Inputs
-
-Each record in the final training dataset corresponds to a user impression (an item shown to a user at a given time).
+## 🎯 High-Level Design of Training Inputs
+Each record in the final training dataset corresponds to a **user impression** (an item shown to a user at a given time).
 
 For each impression, we build the following fields:
 
-Column	Type	Description
-customer_id	String	Unique ID of the user
-dt	Timestamp/Date	Impression date
-actions	Array<String>	List of up to the last 1000 item IDs the user interacted with before the impression
-action_types	Array<String>	Parallel array of action types (click, cart, order)
-impression_id	String	The item ID shown in the impression
-label	Integer (0/1)	Target variable (1 if user later purchased the impression item, 0 otherwise)
+| Column        | Type           | Description |
+|---------------|----------------|-------------|
+| `customer_id` | String         | Unique ID of the user |
+| `dt`          | Timestamp/Date | Impression date |
+| `actions`     | Array          | List of up to the last 1000 item IDs the user interacted with before the impression |
+| `action_types`| Array          | Parallel array of action types (`click`, `cart`, `order`) |
+| `impression_id` | String       | The item ID shown in the impression |
+| `label`       | Integer (0/1)  | Target variable (1 if user later purchased the impression item, 0 otherwise) |
 
-This structure is GPU-friendly:
+### Why this structure?
+- **GPU-friendly**: actions and action types are in array form → directly mapped to embedding indices.  
+- Each record is a **self-contained training example**, so PyTorch can batch them without extra joins.  
+- Stored in **Parquet** → efficient columnar storage and fast I/O.  
 
-Actions and action types are already in array form → can be mapped to embedding indices directly.
+---
 
-Each record is a self-contained training example, so PyTorch can batch them without extra joins.
+## 🔮 How Training Will Work (Future Iteration)
+- Item IDs will be mapped to **embedding indices** using a precomputed dictionary.
+- Each `actions` sequence will be fed into a **sequential model** (e.g., Transformer, GRU, DeepFM).
+- `action_types` embeddings may be concatenated to enrich the representation.
+- The model will learn to predict the probability that the impression item (`impression_id`) will be clicked or ordered (`label`).
+- Structured data enables **maximal GPU utilization** with minimal preprocessing.
 
-Stored in Parquet, which provides efficient columnar storage and fast I/O.
+---
 
-How Training Will Work (future iteration)
+## ⚙️ PySpark Pipeline
 
-Item IDs will be mapped to embedding indices using a precomputed dictionary.
+Implemented in **`pipeline.py`**
 
-Each actions sequence will be fed into a sequential model (e.g., Transformer, GRU, or DeepFM).
+### Inputs
+- `clicks_df`: user click logs  
+- `carts_df`: user add-to-cart logs  
+- `orders_df`: user order logs  
+- `impressions_df`: impression logs (each row = user saw item at time `t`)
 
-action_types embeddings may be concatenated to enrich the representation.
+### Steps
+1. Union clicks, carts, and orders into one `actions` DataFrame:  
+   `(customer_id, item_id, action_type, ts)`
+2. For each user, **sort actions by time** and keep only the **last 1000 actions** before each impression.
+3. Join impressions with actions → build `(actions, action_types)` sequences.
+4. Derive `label` by checking whether the `impression_id` was later ordered by the user.
+5. Write output to **Parquet** for downstream training.
 
-The model will learn to predict the probability that the impression item (impression_id) will be clicked or ordered (label).
+---
 
-Since data is structured efficiently, GPU training can be maximized with minimal preprocessing.
+## ⚡ Performance Notes
+- Spark **window functions** used for efficient ranking and filtering.  
+- **Column pruning** reduces shuffle size.  
+- **Parquet output** ensures fast I/O and columnar reads during GPU training.  
 
-PySpark Pipeline
+---
 
-Implemented in pipeline.py:
+## 🧪 Tests
 
-Inputs
+Implemented in **`tests/test_pipeline.py`** using **pytest**.
 
-clicks_df: user click logs
-
-carts_df: user add-to-cart logs
-
-orders_df: user order logs
-
-impressions_df: impression logs (each row = user saw item at time t)
-
-Steps
-
-Union clicks, carts, orders into one actions DataFrame with schema (customer_id, item_id, action_type, ts)
-
-For each user, sort actions by time and keep only the last 1000 actions before each impression.
-
-Join impressions with actions → build (actions, action_types) sequences.
-
-Derive label by checking whether the impression_id was later ordered by the user.
-
-Write output to Parquet for downstream training.
-
-Performance Notes
-
-Uses Spark window functions to rank/filter actions efficiently.
-
-Column pruning to reduce shuffle size.
-
-Parquet output ensures efficient I/O and columnar reads during GPU training.
-
-Tests
-
-Implemented in tests/test_pipeline.py using pytest:
-
-✅ Small synthetic datasets (correctness of action ordering, labels, sequence length).
-
-✅ Edge cases:
-
-Users with no prior actions
-
-Users with only one action
-
-Users with >1000 actions (trimmed to last 1000)
-
-Impressions with future actions (filtered correctly)
-
-Invalid timestamps handled
-
-✅ Large synthetic dataset to simulate production scale (performance + memory usage).
+### ✅ Covered Scenarios
+- **Small synthetic datasets**
+  - Correctness of action ordering, labels, and sequence length.
+- **Edge cases**
+  - Users with no prior actions  
+  - Users with only one action  
+  - Users with >1000 actions (**trimmed**)  
+  - Impressions with future actions (**filtered correctly**)  
+  - Invalid timestamps handled gracefully
+- **Large synthetic dataset**
+  - Simulates production scale to test **performance and memory usage**.
 
 Run tests locally:
 
+```bash
 pytest tests/
 
-How to Run
-1. On Local Spark
+
+▶️ How to Run
+On Local Spark
 python pipeline.py \
   --clicks path/to/clicks.parquet \
   --carts path/to/carts.parquet \
@@ -111,7 +100,8 @@ python pipeline.py \
   --impressions path/to/impressions.parquet \
   --output path/to/output/training_data.parquet
 
-2. On Databricks
+
+On Databricks
 
 Upload the repo to a Databricks workspace and run:
 
@@ -120,14 +110,11 @@ from pipeline import build_training_dataset
 training_df = build_training_dataset(clicks_df, carts_df, orders_df, impressions_df)
 training_df.write.mode("overwrite").parquet("/mnt/output/training_data/")
 
-Deliverables in This Repo
 
-README.md (this file)
+📦 Deliverables in This Repo
 
+README.md → project documentation (this file)
 pipeline.py → PySpark pipeline implementation
-
-tests/test_pipeline.py → Unit & integration tests
-
-synthetic_data_generator.py → Create fake click/cart/order/impression logs for testing
-
+tests/test_pipeline.py → unit & integration tests
+synthetic_data_generator.py → generate fake click/cart/order/impression logs for testing
 requirements.txt → Python dependencies
